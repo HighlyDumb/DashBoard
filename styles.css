@@ -272,6 +272,86 @@ button {
   margin: 0;
 }
 
+/* ---------- Study panel ---------- */
+
+.icon-btn--tiny {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.study-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.study-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.study-stat-num {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.study-stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.study-connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.study-connect-form input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font-body);
+  width: 100%;
+}
+
+.study-connect-form input:focus {
+  border-color: var(--accent);
+}
+
+.btn-small {
+  padding: 9px;
+  font-size: 13px;
+}
+
+.btn-tiny {
+  font-size: 12px;
+  padding: 4px 6px;
+  align-self: flex-start;
+}
+
+.study-error {
+  background: #E36B6B1A;
+  border: 1px solid #E36B6B55;
+  color: var(--danger);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.study-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
 @media (max-width: 760px) {
   .grid {
     grid-template-columns: 1fr;

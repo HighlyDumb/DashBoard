@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Deck</title>
+<meta name="description" content="Personal dashboard" />
+<meta name="theme-color" content="#14181F" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <main id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+      <p class="eyebrow">Deck</p>
+      <h1 class="auth-title">Sign in</h1>
+      <p class="auth-sub">Your dashboard. Nobody else's.</p>
+
+      <form id="auth-form" class="auth-form">
+        <label class="field">
+          <span>Email</span>
+          <input type="email" id="email" autocomplete="email" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" id="password" autocomplete="current-password" required />
+        </label>
+
+        <div id="auth-error" class="auth-error" role="alert" hidden></div>
+
+        <button type="submit" class="btn-primary" id="signin-btn">Sign in</button>
+        <button type="button" class="btn-ghost" id="signup-btn">Create account instead</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- DASHBOARD -->
+  <div id="app" class="app" hidden>
+
+    <!-- status strip: signature element -->
+    <header class="status-strip">
+      <div class="status-left">
+        <span class="status-greeting" id="greeting">—</span>
+        <span class="status-date" id="date-text">—</span>
+      </div>
+      <div class="status-right">
+        <span class="status-clock" id="clock">--:--</span>
+        <button class="icon-btn" id="signout-btn" title="Sign out" aria-label="Sign out">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <path d="M16 17l5-5-5-5"/>
+            <path d="M21 12H9"/>
+          </svg>
+        </button>
+      </div>
+      <div class="day-progress-track" aria-hidden="true">
+        <div class="day-progress-fill" id="day-progress"></div>
+      </div>
+    </header>
+
+    <!-- panel grid -->
+    <main class="grid" id="panel-grid">
+
+      <section class="panel panel--wide" data-panel="calendar">
+        <div class="panel-head">
+          <h2>Calendar</h2>
+          <span class="panel-tag">Phase 8</span>
+        </div>
+        <p class="panel-empty">Google Calendar sync lands later in the build.</p>
+      </section>
+
+      <section class="panel" data-panel="todo">
+        <div class="panel-head">
+          <h2>To-do</h2>
+          <span class="panel-tag">Phase 4</span>
+        </div>
+        <p class="panel-empty">Not built yet.</p>
+      </section>
+
+      <section class="panel" data-panel="notes">
+        <div class="panel-head">
+          <h2>Quick notes</h2>
+          <span class="panel-tag">Phase 5</span>
+        </div>
+        <p class="panel-empty">Not built yet.</p>
+      </section>
+
+      <section class="panel" data-panel="habits">
+        <div class="panel-head">
+          <h2>Habits</h2>
+          <span class="panel-tag">Phase 6</span>
+        </div>
+        <p class="panel-empty">Not built yet.</p>
+      </section>
+
+      <section class="panel" data-panel="watchlist">
+        <div class="panel-head">
+          <h2>Movies &amp; series</h2>
+          <span class="panel-tag">Phase 7</span>
+        </div>
+        <p class="panel-empty">Not built yet.</p>
+      </section>
+
+      <section class="panel" data-panel="study">
+        <div class="panel-head">
+          <h2>Study</h2>
+          <span class="panel-tag">Phase 3</span>
+        </div>
+        <p class="panel-empty">Live stats will read from your study site's Supabase project.</p>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

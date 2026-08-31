@@ -767,8 +767,19 @@ subtaskInput.addEventListener("keydown", (e) => {
   }
 });
 
+// Service worker + offline caching is deferred to the final PWA-polish
+// phase - it was registered too early and has been serving stale files
+// during active development. This actively removes any copy that's
+// already installed on this device/browser, and deletes its caches, so
+// no manual devtools steps are needed. Safe to run every load: if nothing
+// is registered, both calls just resolve to nothing.
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((reg) => reg.unregister());
+  });
+}
+if ("caches" in window) {
+  caches.keys().then((keys) => {
+    keys.forEach((key) => caches.delete(key));
   });
 }

@@ -139,7 +139,7 @@
             <button type="submit">Add</button>
           </form>
           <p class="panel-empty" id="todo-empty">Nothing on your list yet.</p>
-          <ul class="todo-list" id="todo-list"></ul>
+          <div id="todo-groups"></div>
         </section>
 
         <section class="page" data-view="notes" id="page-notes" hidden>
@@ -170,6 +170,78 @@
         </section>
 
       </main>
+    </div>
+
+    <!-- To-do edit panel -->
+    <div class="todo-edit-overlay" id="todo-edit-overlay" hidden>
+      <div class="todo-edit-panel" role="dialog" aria-modal="true" aria-label="Edit to-do">
+        <div class="todo-edit-head">
+          <h2>Edit to-do</h2>
+          <button class="icon-btn" id="todo-edit-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <form id="todo-edit-form" class="todo-edit-form">
+          <label class="field">
+            <span>Title</span>
+            <input type="text" id="edit-title" required />
+          </label>
+          <label class="field">
+            <span>Notes</span>
+            <textarea id="edit-notes" rows="3"></textarea>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Due date</span>
+              <input type="date" id="edit-due-date" />
+            </label>
+            <label class="field">
+              <span>Due time</span>
+              <input type="time" id="edit-due-time" />
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Priority</span>
+              <select id="edit-priority">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Repeat</span>
+              <select id="edit-recurrence">
+                <option value="none">Doesn't repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="subtasks-section">
+            <span class="field-label">Subtasks</span>
+            <ul class="subtask-list" id="subtask-list"></ul>
+            <div class="subtask-form">
+              <input type="text" id="subtask-input" placeholder="Add a subtask…" autocomplete="off" />
+              <button type="button" class="btn-ghost btn-tiny" id="subtask-add-btn">Add</button>
+            </div>
+          </div>
+
+          <div class="todo-edit-actions">
+            <button type="button" class="btn-ghost" id="todo-edit-delete">Delete</button>
+            <button type="submit" class="btn-primary btn-small">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Undo toast -->
+    <div class="undo-toast" id="undo-toast" hidden>
+      <span id="undo-toast-text">To-do deleted.</span>
+      <button id="undo-toast-btn">Undo</button>
     </div>
   </div>
 

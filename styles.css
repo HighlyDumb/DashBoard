@@ -217,52 +217,126 @@ button {
 
 /* ---------- Panel grid ---------- */
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--gap);
-  padding: 8px 24px 32px;
-  max-width: 1100px;
-  margin: 0 auto;
+.app-shell {
+  display: flex;
+  align-items: flex-start;
 }
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px 18px 20px;
-  min-height: 140px;
+.sidebar {
+  width: 208px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  padding: 4px 12px 24px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
 }
 
-.panel--wide {
-  grid-column: span 3;
+.nav-item svg { flex-shrink: 0; }
+
+.nav-item:hover { background: var(--panel-hover); color: var(--text); }
+
+.nav-item.active {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
-.panel-head {
+.nav-item--soon {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nav-item--soon:hover { background: transparent; color: var(--text-muted); }
+
+.nav-soon-tag {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.page-area {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 24px 32px;
+  max-width: 860px;
+}
+
+.page-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 18px;
 }
 
-.panel-head h2 {
+.page-head h1 {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 22px;
   font-weight: 600;
   margin: 0;
 }
 
-.panel-tag {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+/* ---------- Home overview ---------- */
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--gap);
+}
+
+.home-card {
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 100px;
-  padding: 3px 9px;
+  border-radius: var(--radius);
+  padding: 18px;
+  min-height: 100px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: inherit;
+}
+
+.home-card:hover { border-color: var(--accent); }
+.home-card:disabled { cursor: default; opacity: 0.6; }
+.home-card:disabled:hover { border-color: var(--border); }
+
+.home-card--wide { grid-column: span 2; }
+
+.home-card h2 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.home-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .panel-empty {
@@ -272,7 +346,104 @@ button {
   margin: 0;
 }
 
-/* ---------- Study panel ---------- */
+/* ---------- To-do page ---------- */
+
+.todo-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.todo-form input {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: var(--font-body);
+}
+
+.todo-form input:focus { border-color: var(--accent); }
+
+.todo-form button {
+  background: var(--accent);
+  color: #1A1300;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 18px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.todo-form button:hover { filter: brightness(1.08); }
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.todo-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #0E1712;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.todo-item--done .todo-check {
+  background: var(--good);
+  border-color: var(--good);
+}
+
+.todo-title {
+  flex: 1;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.todo-item--done .todo-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.todo-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.todo-delete:hover { color: var(--danger); }
+
+/* ---------- Study page ---------- */
 
 .icon-btn--tiny {
   width: 26px;
@@ -353,12 +524,37 @@ button {
 }
 
 @media (max-width: 760px) {
-  .grid {
-    grid-template-columns: 1fr;
-    padding: 8px 16px 28px;
-  }
-  .panel--wide { grid-column: span 1; }
   .status-strip { padding: 18px 16px 14px; }
+
+  .app-shell { flex-direction: column; }
+
+  .sidebar {
+    flex-direction: row;
+    width: auto;
+    overflow-x: auto;
+    padding: 4px 12px 14px;
+    gap: 2px;
+  }
+
+  .nav-item {
+    flex-direction: column;
+    gap: 3px;
+    width: auto;
+    padding: 8px 12px;
+    font-size: 10px;
+  }
+
+  .nav-item .nav-label { white-space: nowrap; }
+
+  .nav-soon-tag { display: none; }
+
+  .page-area {
+    padding: 8px 16px 28px;
+    max-width: none;
+  }
+
+  .home-grid { grid-template-columns: 1fr; }
+  .home-card--wide { grid-column: span 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

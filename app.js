@@ -69,11 +69,17 @@ signoutBtn.addEventListener("click", async () => {
   await db.auth.signOut();
 });
 
+const VALID_VIEWS = ["home", "todo", "notes", "habits", "watchlist", "study"];
+
 function showApp() {
   authScreen.hidden = true;
   app.hidden = false;
   startClock();
-  initStudyPanel();
+  let lastView = null;
+  try {
+    lastView = localStorage.getItem("deck-last-view");
+  } catch (e) {}
+  navigateTo(VALID_VIEWS.includes(lastView) ? lastView : "home");
 }
 
 function showAuth() {
@@ -130,6 +136,40 @@ function stopClock() {
   if (clockInterval) clearInterval(clockInterval);
   clockInterval = null;
 }
+
+// ---------- Router: sidebar + home cards swap which page is visible ----------
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function navigateTo(view) {
+  if (!VALID_VIEWS.includes(view)) return;
+
+  document.querySelectorAll(".page").forEach((el) => {
+    el.hidden = el.dataset.view !== view;
+  });
+  document.querySelectorAll(".nav-item[data-view]").forEach((el) => {
+    el.classList.toggle("active", el.dataset.view === view);
+  });
+
+  try {
+    localStorage.setItem("deck-last-view", view);
+  } catch (e) {}
+
+  if (view === "todo") loadTodos();
+  if (view === "study") loadStudyStats();
+}
+
+document.querySelectorAll(".nav-item[data-view]:not([disabled])").forEach((btn) => {
+  btn.addEventListener("click", () => navigateTo(btn.dataset.view));
+});
+
+document.querySelectorAll(".home-card[data-view]:not([disabled])").forEach((btn) => {
+  btn.addEventListener("click", () => navigateTo(btn.dataset.view));
+});
 
 // ---------- Study panel: read-only stats from Study Suite's Supabase ----------
 
@@ -326,11 +366,133 @@ async function loadStudyStats() {
   }
 }
 
-function initStudyPanel() {
-  loadStudyStats();
+studyRefreshBtn.addEventListener("click", loadStudyStats);
+
+// ---------- To-do page ----------
+
+let todos = [];
+let todosLoaded = false;
+let todosChannel = null;
+
+const todoForm = document.getElementById("todo-form");
+const todoInput = document.getElementById("todo-input");
+const todoListEl = document.getElementById("todo-list");
+const todoEmptyEl = document.getElementById("todo-empty");
+
+function renderTodos() {
+  if (!todos.length) {
+    todoListEl.innerHTML = "";
+    todoEmptyEl.hidden = false;
+    return;
+  }
+  todoEmptyEl.hidden = true;
+
+  const sorted = [...todos].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    return new Date(a.created_at) - new Date(b.created_at);
+  });
+
+  todoListEl.innerHTML = sorted
+    .map(
+      (t) => `
+    <li class="todo-item${t.done ? " todo-item--done" : ""}" data-id="${t.id}">
+      <button class="todo-check" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">
+        ${t.done ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' : ""}
+      </button>
+      <span class="todo-title">${escapeHtml(t.title)}</span>
+      <button class="todo-delete" aria-label="Delete to-do">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+      </button>
+    </li>`
+    )
+    .join("");
 }
 
-studyRefreshBtn.addEventListener("click", loadStudyStats);
+async function getCurrentUserId() {
+  const {
+    data: { session },
+  } = await db.auth.getSession();
+  return session ? session.user.id : null;
+}
+
+async function loadTodos() {
+  if (!todosLoaded) {
+    todoListEl.innerHTML = "";
+    todoEmptyEl.hidden = true;
+    todoEmptyEl.textContent = "Loading…";
+    todoEmptyEl.hidden = false;
+  }
+  const { data, error } = await db.from("todos").select("*").order("created_at", { ascending: true });
+  if (error) {
+    console.error("Could not load to-dos", error);
+    todoEmptyEl.textContent = "Couldn't load your to-dos.";
+    todoEmptyEl.hidden = false;
+    return;
+  }
+  todos = data || [];
+  todosLoaded = true;
+  todoEmptyEl.textContent = "Nothing on your list yet.";
+  renderTodos();
+  subscribeTodos();
+}
+
+function subscribeTodos() {
+  if (todosChannel) return;
+  todosChannel = db
+    .channel("deck-todos-changes")
+    .on("postgres_changes", { event: "*", schema: "public", table: "todos" }, () => {
+      loadTodos();
+    })
+    .subscribe();
+}
+
+todoForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = todoInput.value.trim();
+  if (!title) return;
+  todoInput.value = "";
+
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const { data: row, error } = await db.from("todos").insert({ user_id: userId, title }).select().single();
+  if (error) {
+    console.error("Could not add to-do", error);
+    return;
+  }
+  todos.push(row);
+  renderTodos();
+});
+
+todoListEl.addEventListener("click", async (e) => {
+  const item = e.target.closest(".todo-item");
+  if (!item) return;
+  const id = item.dataset.id;
+  const todo = todos.find((t) => t.id === id);
+  if (!todo) return;
+
+  if (e.target.closest(".todo-check")) {
+    const newDone = !todo.done;
+    todo.done = newDone;
+    renderTodos();
+    const { error } = await db.from("todos").update({ done: newDone }).eq("id", id);
+    if (error) {
+      console.error("Could not update to-do", error);
+      todo.done = !newDone;
+      renderTodos();
+    }
+  } else if (e.target.closest(".todo-delete")) {
+    const previous = todos;
+    todos = todos.filter((t) => t.id !== id);
+    renderTodos();
+    const { error } = await db.from("todos").delete().eq("id", id);
+    if (error) {
+      console.error("Could not delete to-do", error);
+      todos = previous;
+      renderTodos();
+    }
+  }
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

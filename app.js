@@ -69,7 +69,7 @@ signoutBtn.addEventListener("click", async () => {
   await db.auth.signOut();
 });
 
-const VALID_VIEWS = ["home", "todo", "reading", "habits", "watchlist", "study", "ideas"];
+const VALID_VIEWS = ["home", "todo", "reading", "habits", "watchlist", "study", "ideas", "projects"];
 
 function showApp() {
   authScreen.hidden = true;
@@ -165,6 +165,7 @@ function navigateTo(view) {
   if (view === "watchlist") loadWatchlist();
   if (view === "study") loadStudyStats();
   if (view === "ideas") loadIdeas();
+  if (view === "projects") loadProjects();
 }
 
 document.querySelectorAll(".nav-item[data-view]:not([disabled])").forEach((btn) => {
@@ -2042,6 +2043,7 @@ async function loadIdeas() {
   }
   ideas = data || [];
   ideasLoaded = true;
+  await ensureProjectsCache();
   if (!ideaCategories.some((c) => c.id === activeIdeaCategory)) activeIdeaCategory = "all";
   if (!ideaStatuses.some((s) => s.id === activeIdeaStatus)) activeIdeaStatus = "all";
   renderIdeasPage();
@@ -2183,12 +2185,20 @@ function renderIdeaCard(it) {
         ? `<div class="idea-meta-row">${it.tags.map((t) => `<span class="idea-tag">${escapeHtml(t)}</span>`).join("")}</div>`
         : ""
     }
+    ${(() => {
+      const linked = projectIdeaLinks.filter((l) => l.idea_id === it.id).map((l) => projects.find((p) => p.id === l.project_id)).filter(Boolean);
+      return linked.length
+        ? `<div class="idea-meta-row">${linked.map((p) => `<span class="idea-tag idea-tag--project">📁 ${escapeHtml(p.title)}</span>`).join("")}</div>`
+        : "";
+    })()}
     <div class="idea-card-actions">
+      <button type="button" class="btn-ghost btn-tiny" data-action="link-project">Link to project</button>
       <button type="button" class="btn-ghost btn-tiny" data-action="edit">Edit</button>
       <button type="button" class="btn-ghost btn-tiny btn-ghost--danger" data-action="delete">Delete</button>
     </div>
   `;
 
+  card.querySelector('[data-action="link-project"]').addEventListener("click", () => openProjectPicker(it.id));
   card.querySelector('[data-action="edit"]').addEventListener("click", () => openIdeaModal(it));
   card.querySelector('[data-action="delete"]').addEventListener("click", () => openIdeaDeleteModal(it));
 
@@ -2480,6 +2490,667 @@ ideaStatusAddForm.addEventListener("submit", async (e) => {
 // ---------- Search control ----------
 
 ideaSearchInput.addEventListener("input", renderIdeaList);
+
+// ---------- Projects page ----------
+// A project bundles a goal with its own task checklist and notes, plus
+// links into the Ideas Vault (many-to-many via project_ideas). Linking an
+// idea to a project - from either side - also flips that idea's status to
+// whichever idea_statuses row is named "Active" (case-insensitive), so
+// it's easy to see which ideas turned into real work. Tasks/notes here are
+// intentionally project-only: they never touch the todos table or (once
+// it exists) a standalone Notes page.
+
+let projects = [];
+let projectTasks = [];
+let projectNotes = [];
+let projectIdeaLinks = [];
+let projectsLoaded = false;
+let projectsChannel = null;
+let editingProjectId = null;
+let pendingDeleteProjectId = null;
+let detailProjectId = null;
+let pickerForProjectId = null; // project we're linking an idea into
+let pickerForIdeaId = null; // idea we're linking a project onto
+
+const projectSearchInput = document.getElementById("project-search");
+const projectListEl = document.getElementById("project-list");
+const projectEmptyEl = document.getElementById("project-empty");
+const projectAddBtn = document.getElementById("project-add-btn");
+
+const projectModalOverlay = document.getElementById("project-modal-overlay");
+const projectModalTitle = document.getElementById("project-modal-title");
+const projectModalForm = document.getElementById("project-modal-form");
+const projectModalCancel = document.getElementById("project-modal-cancel");
+const pfTitle = document.getElementById("pf-title");
+const pfGoal = document.getElementById("pf-goal");
+const projectTitleError = document.getElementById("project-title-error");
+
+const projectDeleteOverlay = document.getElementById("project-delete-overlay");
+const projectDeleteMsg = document.getElementById("project-delete-msg");
+const projectDeleteCancel = document.getElementById("project-delete-cancel");
+const projectDeleteConfirm = document.getElementById("project-delete-confirm");
+
+const projectDetailOverlay = document.getElementById("project-detail-overlay");
+const projectDetailTitle = document.getElementById("project-detail-title");
+const projectDetailGoal = document.getElementById("project-detail-goal");
+const projectDetailProgressFill = document.getElementById("project-detail-progress-fill");
+const projectDetailProgressLabel = document.getElementById("project-detail-progress-label");
+const projectDetailEditBtn = document.getElementById("project-detail-edit-btn");
+const projectDetailDeleteBtn = document.getElementById("project-detail-delete-btn");
+const projectDetailCloseBtn = document.getElementById("project-detail-close-btn");
+const projectDetailTasksEl = document.getElementById("project-detail-tasks");
+const projectNewTaskInput = document.getElementById("project-new-task");
+const projectAddTaskBtn = document.getElementById("project-add-task-btn");
+const projectDetailIdeasEl = document.getElementById("project-detail-ideas");
+const projectLinkIdeaBtn = document.getElementById("project-link-idea-btn");
+const projectDetailNotesEl = document.getElementById("project-detail-notes");
+const projectNewNoteInput = document.getElementById("project-new-note");
+const projectAddNoteBtn = document.getElementById("project-add-note-btn");
+
+const ideaPickerOverlay = document.getElementById("idea-picker-overlay");
+const ideaPickerSearch = document.getElementById("idea-picker-search");
+const ideaPickerList = document.getElementById("idea-picker-list");
+const ideaPickerNewForm = document.getElementById("idea-picker-new-form");
+const ideaPickerNewInput = document.getElementById("idea-picker-new-input");
+const ideaPickerCancel = document.getElementById("idea-picker-cancel");
+
+const projectPickerOverlay = document.getElementById("project-picker-overlay");
+const projectPickerSearch = document.getElementById("project-picker-search");
+const projectPickerList = document.getElementById("project-picker-list");
+const projectPickerNewForm = document.getElementById("project-picker-new-form");
+const projectPickerNewInput = document.getElementById("project-picker-new-input");
+const projectPickerCancel = document.getElementById("project-picker-cancel");
+
+function projectProgress(p) {
+  const tasks = projectTasks.filter((t) => t.project_id === p.id);
+  if (!tasks.length) return 0;
+  return Math.round((tasks.filter((t) => t.done).length / tasks.length) * 100);
+}
+
+// Loads categories/statuses/ideas even if the Ideas page was never opened,
+// so titles and status badges resolve correctly from the Projects side.
+async function ensureIdeasCache() {
+  await ensureIdeaTaxonomy();
+  const { data, error } = await db.from("ideas").select("*").order("created_at", { ascending: false });
+  if (!error) ideas = data || [];
+}
+
+// Loads projects + their idea links even if the Projects page was never
+// opened, so the Ideas Vault can show "linked to" chips and the picker.
+async function ensureProjectsCache() {
+  const [pRes, liRes] = await Promise.all([
+    db.from("projects").select("*").order("created_at", { ascending: false }),
+    db.from("project_ideas").select("*"),
+  ]);
+  if (!pRes.error) projects = pRes.data || [];
+  if (!liRes.error) projectIdeaLinks = liRes.data || [];
+}
+
+async function loadProjects() {
+  if (!projectsLoaded) {
+    projectEmptyEl.textContent = "Loading…";
+    projectEmptyEl.hidden = false;
+    projectListEl.innerHTML = "";
+  }
+  const [pRes, tRes, nRes, liRes] = await Promise.all([
+    db.from("projects").select("*").order("created_at", { ascending: false }),
+    db.from("project_tasks").select("*"),
+    db.from("project_notes").select("*"),
+    db.from("project_ideas").select("*"),
+  ]);
+  if (pRes.error || tRes.error || nRes.error || liRes.error) {
+    console.error("Could not load projects", pRes.error || tRes.error || nRes.error || liRes.error);
+    projectEmptyEl.textContent = "Couldn't load your projects.";
+    projectEmptyEl.hidden = false;
+    return;
+  }
+  projects = pRes.data || [];
+  projectTasks = tRes.data || [];
+  projectNotes = nRes.data || [];
+  projectIdeaLinks = liRes.data || [];
+  await ensureIdeasCache();
+  projectsLoaded = true;
+  renderProjects();
+  if (detailProjectId) renderProjectDetail();
+  subscribeProjects();
+}
+
+function subscribeProjects() {
+  if (projectsChannel) return;
+  projectsChannel = db
+    .channel("deck-projects-changes")
+    .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => loadProjects())
+    .on("postgres_changes", { event: "*", schema: "public", table: "project_tasks" }, () => loadProjects())
+    .on("postgres_changes", { event: "*", schema: "public", table: "project_notes" }, () => loadProjects())
+    .on("postgres_changes", { event: "*", schema: "public", table: "project_ideas" }, () => loadProjects())
+    .subscribe();
+}
+
+function renderProjects() {
+  const search = projectSearchInput.value.trim().toLowerCase();
+  const filtered = projects.filter((p) => {
+    if (!search) return true;
+    return (p.title || "").toLowerCase().includes(search) || (p.goal || "").toLowerCase().includes(search);
+  });
+
+  projectListEl.innerHTML = "";
+  filtered.forEach((p) => projectListEl.appendChild(renderProjectCard(p)));
+
+  if (!filtered.length) {
+    projectEmptyEl.textContent = projects.length ? "No projects match your search." : "No projects yet. Tap + to start one.";
+    projectEmptyEl.hidden = false;
+  } else {
+    projectEmptyEl.hidden = true;
+  }
+}
+
+function renderProjectCard(p) {
+  const card = document.createElement("div");
+  card.className = "project-card";
+  card.dataset.id = p.id;
+
+  const tasks = projectTasks.filter((t) => t.project_id === p.id);
+  const doneCount = tasks.filter((t) => t.done).length;
+  const ideaCount = projectIdeaLinks.filter((l) => l.project_id === p.id).length;
+  const noteCount = projectNotes.filter((n) => n.project_id === p.id).length;
+  const pct = projectProgress(p);
+
+  card.innerHTML = `
+    <div class="project-card-top">
+      <p class="project-card-title">${escapeHtml(p.title)}</p>
+    </div>
+    ${p.goal ? `<p class="project-card-goal">${escapeHtml(p.goal)}</p>` : ""}
+    <div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div>
+    <div class="project-card-counts">
+      <span>${doneCount}/${tasks.length} tasks</span>
+      <span>${ideaCount} idea${ideaCount === 1 ? "" : "s"}</span>
+      <span>${noteCount} note${noteCount === 1 ? "" : "s"}</span>
+    </div>
+    <div class="project-card-actions">
+      <button type="button" class="btn-ghost btn-tiny" data-action="edit">Edit</button>
+      <button type="button" class="btn-ghost btn-tiny btn-ghost--danger" data-action="delete">Delete</button>
+    </div>
+  `;
+
+  card.addEventListener("click", (e) => {
+    if (e.target.closest("[data-action]")) return;
+    openProjectDetail(p.id);
+  });
+  card.querySelector('[data-action="edit"]').addEventListener("click", (e) => {
+    e.stopPropagation();
+    openProjectModal(p);
+  });
+  card.querySelector('[data-action="delete"]').addEventListener("click", (e) => {
+    e.stopPropagation();
+    openProjectDeleteModal(p);
+  });
+
+  return card;
+}
+
+// ---------- Add/edit modal ----------
+
+function openProjectModal(project) {
+  editingProjectId = project ? project.id : null;
+  projectModalTitle.textContent = project ? "Edit project" : "New project";
+  pfTitle.value = project ? project.title : "";
+  pfGoal.value = project ? project.goal || "" : "";
+  projectTitleError.classList.remove("show");
+  projectModalOverlay.hidden = false;
+}
+
+function closeProjectModal() {
+  projectModalOverlay.hidden = true;
+  editingProjectId = null;
+}
+
+projectAddBtn.addEventListener("click", () => openProjectModal(null));
+projectModalCancel.addEventListener("click", closeProjectModal);
+projectModalOverlay.addEventListener("click", (e) => {
+  if (e.target === projectModalOverlay) closeProjectModal();
+});
+
+projectModalForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = pfTitle.value.trim();
+  if (!title) {
+    projectTitleError.classList.add("show");
+    return;
+  }
+  projectTitleError.classList.remove("show");
+
+  const updates = { title, goal: pfGoal.value.trim() || null };
+
+  if (editingProjectId) {
+    const p = projects.find((x) => x.id === editingProjectId);
+    if (!p) return;
+    Object.assign(p, updates);
+    renderProjects();
+    if (detailProjectId === editingProjectId) renderProjectDetail();
+    closeProjectModal();
+    const { error } = await db.from("projects").update(updates).eq("id", p.id);
+    if (error) console.error("Could not save project", error);
+  } else {
+    const userId = await getCurrentUserId();
+    if (!userId) return;
+    const { data: row, error } = await db
+      .from("projects")
+      .insert({ user_id: userId, ...updates })
+      .select()
+      .single();
+    if (error) {
+      console.error("Could not add project", error);
+      return;
+    }
+    projects.unshift(row);
+    renderProjects();
+    closeProjectModal();
+  }
+});
+
+// ---------- Delete confirmation modal ----------
+
+function openProjectDeleteModal(p) {
+  pendingDeleteProjectId = p.id;
+  projectDeleteMsg.textContent = `"${p.title}" and its tasks, idea links, and notes will be removed. This can't be undone.`;
+  projectDeleteOverlay.hidden = false;
+}
+
+function closeProjectDeleteModal() {
+  projectDeleteOverlay.hidden = true;
+  pendingDeleteProjectId = null;
+}
+
+projectDeleteCancel.addEventListener("click", closeProjectDeleteModal);
+projectDeleteOverlay.addEventListener("click", (e) => {
+  if (e.target === projectDeleteOverlay) closeProjectDeleteModal();
+});
+
+projectDeleteConfirm.addEventListener("click", async () => {
+  if (!pendingDeleteProjectId) return;
+  const id = pendingDeleteProjectId;
+  const removed = projects.find((p) => p.id === id);
+  projects = projects.filter((p) => p.id !== id);
+  if (detailProjectId === id) closeProjectDetail();
+  closeProjectDeleteModal();
+  renderProjects();
+
+  const { error } = await db.from("projects").delete().eq("id", id);
+  if (error) {
+    console.error("Could not delete project", error);
+    if (removed) projects.push(removed);
+    renderProjects();
+  }
+});
+
+// ---------- Detail modal ----------
+
+function currentProject() {
+  return projects.find((p) => p.id === detailProjectId);
+}
+
+function openProjectDetail(id) {
+  detailProjectId = id;
+  renderProjectDetail();
+  projectDetailOverlay.hidden = false;
+}
+
+function closeProjectDetail() {
+  projectDetailOverlay.hidden = true;
+  detailProjectId = null;
+}
+
+function renderProjectDetail() {
+  const p = currentProject();
+  if (!p) {
+    closeProjectDetail();
+    return;
+  }
+
+  projectDetailTitle.textContent = p.title;
+  projectDetailGoal.textContent = p.goal || "";
+  const pct = projectProgress(p);
+  projectDetailProgressFill.style.width = pct + "%";
+  projectDetailProgressLabel.textContent = pct + "%";
+
+  const tasks = projectTasks.filter((t) => t.project_id === p.id);
+  projectDetailTasksEl.innerHTML = tasks.length ? "" : `<p class="panel-empty">No tasks yet.</p>`;
+  tasks.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "detail-list-item";
+    row.innerHTML = `
+      <input type="checkbox" ${t.done ? "checked" : ""} />
+      <span class="detail-list-text${t.done ? " strike" : ""}">${escapeHtml(t.text)}</span>
+      <button type="button" class="detail-list-remove" title="Remove">&times;</button>
+    `;
+    row.querySelector("input").addEventListener("change", (e) => toggleProjectTaskDone(t, e.target.checked));
+    row.querySelector(".detail-list-remove").addEventListener("click", () => deleteProjectTask(t));
+    projectDetailTasksEl.appendChild(row);
+  });
+
+  const links = projectIdeaLinks.filter((l) => l.project_id === p.id);
+  projectDetailIdeasEl.innerHTML = links.length ? "" : `<p class="panel-empty">No ideas linked yet.</p>`;
+  links.forEach((link) => {
+    const idea = ideas.find((i) => i.id === link.idea_id);
+    const status = idea ? ideaStatusById(idea.status_id) : null;
+    const row = document.createElement("div");
+    row.className = "detail-list-item";
+    row.innerHTML = `
+      <span class="detail-list-text">${idea ? escapeHtml(idea.title) : "(deleted idea)"}</span>
+      ${status ? `<span class="status-badge" style="background:${status.color}29;color:${status.color};">${escapeHtml(status.name)}</span>` : ""}
+      <button type="button" class="detail-list-remove" title="Unlink">&times;</button>
+    `;
+    row.querySelector(".detail-list-remove").addEventListener("click", () => unlinkProjectIdea(link));
+    projectDetailIdeasEl.appendChild(row);
+  });
+
+  const notes = projectNotes.filter((n) => n.project_id === p.id);
+  projectDetailNotesEl.innerHTML = notes.length ? "" : `<p class="panel-empty">No notes yet.</p>`;
+  notes.forEach((n) => {
+    const row = document.createElement("div");
+    row.className = "detail-list-item";
+    row.innerHTML = `
+      <span class="detail-list-text">${escapeHtml(n.text)}</span>
+      <button type="button" class="detail-list-remove" title="Remove">&times;</button>
+    `;
+    row.querySelector(".detail-list-remove").addEventListener("click", () => deleteProjectNote(n));
+    projectDetailNotesEl.appendChild(row);
+  });
+}
+
+async function toggleProjectTaskDone(t, done) {
+  const prev = t.done;
+  t.done = done;
+  renderProjectDetail();
+  renderProjects();
+  const { error } = await db.from("project_tasks").update({ done }).eq("id", t.id);
+  if (error) {
+    console.error("Could not update task", error);
+    t.done = prev;
+    renderProjectDetail();
+    renderProjects();
+  }
+}
+
+async function deleteProjectTask(t) {
+  projectTasks = projectTasks.filter((x) => x.id !== t.id);
+  renderProjectDetail();
+  renderProjects();
+  const { error } = await db.from("project_tasks").delete().eq("id", t.id);
+  if (error) {
+    console.error("Could not delete task", error);
+    projectTasks.push(t);
+    renderProjectDetail();
+    renderProjects();
+  }
+}
+
+async function deleteProjectNote(n) {
+  projectNotes = projectNotes.filter((x) => x.id !== n.id);
+  renderProjectDetail();
+  renderProjects();
+  const { error } = await db.from("project_notes").delete().eq("id", n.id);
+  if (error) {
+    console.error("Could not delete note", error);
+    projectNotes.push(n);
+    renderProjectDetail();
+    renderProjects();
+  }
+}
+
+async function unlinkProjectIdea(link) {
+  projectIdeaLinks = projectIdeaLinks.filter((l) => l.id !== link.id);
+  renderProjectDetail();
+  renderProjects();
+  if (ideasLoaded) renderIdeasPage();
+  const { error } = await db.from("project_ideas").delete().eq("id", link.id);
+  if (error) {
+    console.error("Could not unlink idea", error);
+    projectIdeaLinks.push(link);
+    renderProjectDetail();
+    renderProjects();
+    if (ideasLoaded) renderIdeasPage();
+  }
+}
+
+projectDetailCloseBtn.addEventListener("click", closeProjectDetail);
+projectDetailEditBtn.addEventListener("click", () => {
+  const p = currentProject();
+  if (p) openProjectModal(p);
+});
+projectDetailDeleteBtn.addEventListener("click", () => {
+  const p = currentProject();
+  if (p) openProjectDeleteModal(p);
+});
+projectDetailOverlay.addEventListener("click", (e) => {
+  if (e.target === projectDetailOverlay) closeProjectDetail();
+});
+
+projectAddTaskBtn.addEventListener("click", async () => {
+  const p = currentProject();
+  if (!p) return;
+  const text = projectNewTaskInput.value.trim();
+  if (!text) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { data: row, error } = await db.from("project_tasks").insert({ user_id: userId, project_id: p.id, text }).select().single();
+  if (error) {
+    console.error("Could not add task", error);
+    return;
+  }
+  projectTasks.push(row);
+  projectNewTaskInput.value = "";
+  renderProjectDetail();
+  renderProjects();
+});
+projectNewTaskInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    projectAddTaskBtn.click();
+  }
+});
+
+projectAddNoteBtn.addEventListener("click", async () => {
+  const p = currentProject();
+  if (!p) return;
+  const text = projectNewNoteInput.value.trim();
+  if (!text) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { data: row, error } = await db.from("project_notes").insert({ user_id: userId, project_id: p.id, text }).select().single();
+  if (error) {
+    console.error("Could not add note", error);
+    return;
+  }
+  projectNotes.push(row);
+  projectNewNoteInput.value = "";
+  renderProjectDetail();
+  renderProjects();
+});
+projectNewNoteInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    projectAddNoteBtn.click();
+  }
+});
+
+// ---------- Search control ----------
+
+projectSearchInput.addEventListener("input", renderProjects);
+
+// ---------- Idea <-> Project linking core ----------
+// Shared by both directions (Ideas Vault "Link to project" and Project
+// detail "Link idea"). Finds an idea_statuses row named "Active"
+// (case-insensitive - statuses are user-editable, so this is a
+// best-effort match) and flips the idea onto it.
+
+function findActiveIdeaStatusId() {
+  const s = ideaStatuses.find((s) => (s.name || "").trim().toLowerCase() === "active");
+  return s ? s.id : null;
+}
+
+async function linkIdeaToProject(ideaId, projectId) {
+  if (projectIdeaLinks.some((l) => l.idea_id === ideaId && l.project_id === projectId)) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const { data: row, error } = await db
+    .from("project_ideas")
+    .insert({ user_id: userId, project_id: projectId, idea_id: ideaId })
+    .select()
+    .single();
+  if (error) {
+    console.error("Could not link idea to project", error);
+    return;
+  }
+  projectIdeaLinks.push(row);
+
+  const activeId = findActiveIdeaStatusId();
+  const idea = ideas.find((i) => i.id === ideaId);
+  if (activeId && idea && idea.status_id !== activeId) {
+    idea.status_id = activeId;
+    const { error: statusErr } = await db.from("ideas").update({ status_id: activeId }).eq("id", ideaId);
+    if (statusErr) console.error("Could not update idea status", statusErr);
+  }
+
+  renderProjects();
+  if (detailProjectId === projectId) renderProjectDetail();
+  if (ideasLoaded) {
+    renderIdeaFilterTabs();
+    renderIdeaList();
+  }
+}
+
+// ---------- Idea picker (link an idea into a project) ----------
+
+function openIdeaPicker(projectId) {
+  pickerForProjectId = projectId;
+  ideaPickerSearch.value = "";
+  ideaPickerNewInput.value = "";
+  renderIdeaPickerList();
+  ideaPickerOverlay.hidden = false;
+  ideaPickerSearch.focus();
+}
+
+function closeIdeaPicker() {
+  ideaPickerOverlay.hidden = true;
+  pickerForProjectId = null;
+}
+
+function renderIdeaPickerList() {
+  const search = ideaPickerSearch.value.trim().toLowerCase();
+  const linkedIds = new Set(projectIdeaLinks.filter((l) => l.project_id === pickerForProjectId).map((l) => l.idea_id));
+  const available = ideas.filter((i) => !linkedIds.has(i.id) && (!search || i.title.toLowerCase().includes(search)));
+
+  ideaPickerList.innerHTML = "";
+  if (!available.length) {
+    ideaPickerList.innerHTML = `<p class="panel-empty">No matching ideas.</p>`;
+    return;
+  }
+  available.forEach((i) => {
+    const row = document.createElement("div");
+    row.className = "picker-row";
+    row.innerHTML = `<span class="picker-row-text">${escapeHtml(i.title)}</span><button type="button" class="btn-ghost btn-tiny">Link</button>`;
+    row.querySelector("button").addEventListener("click", async () => {
+      await linkIdeaToProject(i.id, pickerForProjectId);
+      closeIdeaPicker();
+    });
+    ideaPickerList.appendChild(row);
+  });
+}
+
+ideaPickerSearch.addEventListener("input", renderIdeaPickerList);
+ideaPickerCancel.addEventListener("click", closeIdeaPicker);
+ideaPickerOverlay.addEventListener("click", (e) => {
+  if (e.target === ideaPickerOverlay) closeIdeaPicker();
+});
+projectLinkIdeaBtn.addEventListener("click", () => {
+  const p = currentProject();
+  if (p) openIdeaPicker(p.id);
+});
+
+ideaPickerNewForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = ideaPickerNewInput.value.trim();
+  if (!title || !pickerForProjectId) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  await ensureIdeaTaxonomy();
+  const { data: row, error } = await db
+    .from("ideas")
+    .insert({ user_id: userId, title, priority: "medium", tags: [] })
+    .select()
+    .single();
+  if (error) {
+    console.error("Could not create idea", error);
+    return;
+  }
+  ideas.unshift(row);
+  ideaPickerNewInput.value = "";
+  await linkIdeaToProject(row.id, pickerForProjectId);
+  closeIdeaPicker();
+});
+
+// ---------- Project picker (link a project onto an idea, from Ideas Vault) ----------
+
+function openProjectPicker(ideaId) {
+  pickerForIdeaId = ideaId;
+  projectPickerSearch.value = "";
+  projectPickerNewInput.value = "";
+  renderProjectPickerList();
+  projectPickerOverlay.hidden = false;
+  projectPickerSearch.focus();
+}
+
+function closeProjectPicker() {
+  projectPickerOverlay.hidden = true;
+  pickerForIdeaId = null;
+}
+
+function renderProjectPickerList() {
+  const search = projectPickerSearch.value.trim().toLowerCase();
+  const linkedIds = new Set(projectIdeaLinks.filter((l) => l.idea_id === pickerForIdeaId).map((l) => l.project_id));
+  const available = projects.filter((p) => !linkedIds.has(p.id) && (!search || p.title.toLowerCase().includes(search)));
+
+  projectPickerList.innerHTML = "";
+  if (!available.length) {
+    projectPickerList.innerHTML = `<p class="panel-empty">No matching projects.</p>`;
+    return;
+  }
+  available.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "picker-row";
+    row.innerHTML = `<span class="picker-row-text">${escapeHtml(p.title)}</span><button type="button" class="btn-ghost btn-tiny">Link</button>`;
+    row.querySelector("button").addEventListener("click", async () => {
+      await linkIdeaToProject(pickerForIdeaId, p.id);
+      closeProjectPicker();
+    });
+    projectPickerList.appendChild(row);
+  });
+}
+
+projectPickerSearch.addEventListener("input", renderProjectPickerList);
+projectPickerCancel.addEventListener("click", closeProjectPicker);
+projectPickerOverlay.addEventListener("click", (e) => {
+  if (e.target === projectPickerOverlay) closeProjectPicker();
+});
+
+projectPickerNewForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = projectPickerNewInput.value.trim();
+  if (!title || !pickerForIdeaId) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { data: row, error } = await db.from("projects").insert({ user_id: userId, title, goal: null }).select().single();
+  if (error) {
+    console.error("Could not create project", error);
+    return;
+  }
+  projects.unshift(row);
+  projectPickerNewInput.value = "";
+  await linkIdeaToProject(pickerForIdeaId, row.id);
+  closeProjectPicker();
+});
 
 // Service worker + offline caching is deferred to the final PWA-polish
 // phase - it was registered too early and has been serving stale files

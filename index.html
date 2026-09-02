@@ -96,6 +96,10 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.7.5 1 1.3 1 2.3h6c0-1 .3-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>
           <span class="nav-label">Ideas</span>
         </button>
+        <button class="nav-item" data-view="projects">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="nav-label">Projects</span>
+        </button>
         <button class="nav-item nav-item--soon" data-view="calendar" disabled title="Coming later">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
           <span class="nav-label">Calendar</span>
@@ -136,6 +140,10 @@
             <button class="home-card" data-view="ideas">
               <h2>Ideas</h2>
               <p>Open your ideas vault.</p>
+            </button>
+            <button class="home-card" data-view="projects">
+              <h2>Projects</h2>
+              <p>Open your projects.</p>
             </button>
           </div>
         </section>
@@ -229,6 +237,20 @@
           <div id="study-panel-body">
             <p class="panel-empty">Loading…</p>
           </div>
+
+          <div class="study-embed-wrap">
+            <div class="study-embed-head">
+              <span class="detail-section-title">Study Suite</span>
+              <a href="https://highlydumb.github.io/Study-Suite/" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-tiny">Open in new tab ↗</a>
+            </div>
+            <iframe
+              class="study-embed-frame"
+              id="study-embed-frame"
+              src="https://highlydumb.github.io/Study-Suite/"
+              title="Study Suite"
+              loading="lazy"
+            ></iframe>
+          </div>
         </section>
 
         <section class="page" data-view="ideas" id="page-ideas" hidden>
@@ -252,6 +274,19 @@
           <div class="card-grid" id="idea-list"></div>
 
           <button type="button" class="fab" id="idea-add-btn" title="Add idea">+</button>
+        </section>
+
+        <section class="page" data-view="projects" id="page-projects" hidden>
+          <div class="page-head"><h1>Projects</h1></div>
+
+          <div class="toolbar">
+            <input type="text" id="project-search" class="toolbar-search" placeholder="Search projects…" />
+          </div>
+
+          <p class="panel-empty" id="project-empty">No projects yet. Tap + to start one.</p>
+          <div class="card-grid" id="project-list"></div>
+
+          <button type="button" class="fab" id="project-add-btn" title="Add project">+</button>
         </section>
 
       </main>
@@ -566,6 +601,118 @@
         </form>
         <div class="modal-actions">
           <button type="button" class="btn-primary btn-small" id="idea-status-manage-done">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Project add/edit modal -->
+    <div class="modal-overlay" id="project-modal-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Add or edit project">
+        <h2 id="project-modal-title">New project</h2>
+        <form id="project-modal-form" class="modal-form">
+          <label class="field">
+            <span>Project name</span>
+            <input type="text" id="pf-title" maxlength="120" required />
+            <div class="field-error" id="project-title-error">Enter a project name.</div>
+          </label>
+          <label class="field">
+            <span>Goal (optional)</span>
+            <textarea id="pf-goal" rows="3" maxlength="500" placeholder="What does &quot;done&quot; look like?"></textarea>
+          </label>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="project-modal-cancel">Cancel</button>
+            <button type="submit" class="btn-primary btn-small">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Project delete confirmation modal -->
+    <div class="modal-overlay" id="project-delete-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Delete project">
+        <h2>Delete this project?</h2>
+        <p class="panel-empty" id="project-delete-msg"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="project-delete-cancel">Cancel</button>
+          <button type="button" class="btn-danger" id="project-delete-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Project detail modal -->
+    <div class="modal-overlay" id="project-detail-overlay" hidden>
+      <div class="modal modal--wide" role="dialog" aria-modal="true" aria-label="Project detail">
+        <h2 id="project-detail-title"></h2>
+        <p class="panel-empty" id="project-detail-goal"></p>
+
+        <div class="bar-track"><div class="bar-fill" id="project-detail-progress-fill" style="width:0%;"></div></div>
+        <p class="panel-empty" id="project-detail-progress-label" style="text-align:right;margin-top:4px;">0%</p>
+
+        <div class="detail-header-actions">
+          <button type="button" class="btn-secondary btn-small" id="project-detail-edit-btn">Edit name / goal</button>
+          <button type="button" class="btn-danger btn-small" id="project-detail-delete-btn">Delete project</button>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-section-title">Tasks</div>
+          <div id="project-detail-tasks"></div>
+          <div class="detail-add-row">
+            <input type="text" id="project-new-task" placeholder="Add a task…" />
+            <button type="button" class="btn-secondary btn-tiny" id="project-add-task-btn">Add</button>
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-section-title-row">
+            <div class="detail-section-title">Ideas</div>
+            <button type="button" class="btn-ghost btn-tiny" id="project-link-idea-btn">+ Link idea</button>
+          </div>
+          <div id="project-detail-ideas"></div>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-section-title">Notes</div>
+          <div id="project-detail-notes"></div>
+          <div class="detail-add-row">
+            <input type="text" id="project-new-note" placeholder="Add a note…" />
+            <button type="button" class="btn-secondary btn-tiny" id="project-add-note-btn">Add</button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="project-detail-close-btn">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Idea picker (link an existing or new idea into a project) -->
+    <div class="modal-overlay" id="idea-picker-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Link an idea">
+        <h2>Link an idea</h2>
+        <input type="text" id="idea-picker-search" class="toolbar-search" placeholder="Search ideas…" style="margin-bottom:12px;" />
+        <div class="picker-list" id="idea-picker-list"></div>
+        <form class="manage-add-row" id="idea-picker-new-form">
+          <input type="text" id="idea-picker-new-input" placeholder="Or create a new idea…" />
+          <button type="submit" class="btn-secondary">Create &amp; link</button>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="idea-picker-cancel">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Project picker (link an existing or new project onto an idea) -->
+    <div class="modal-overlay" id="project-picker-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Link a project">
+        <h2>Link a project</h2>
+        <input type="text" id="project-picker-search" class="toolbar-search" placeholder="Search projects…" style="margin-bottom:12px;" />
+        <div class="picker-list" id="project-picker-list"></div>
+        <form class="manage-add-row" id="project-picker-new-form">
+          <input type="text" id="project-picker-new-input" placeholder="Or create a new project…" />
+          <button type="submit" class="btn-secondary">Create &amp; link</button>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="project-picker-cancel">Close</button>
         </div>
       </div>
     </div>

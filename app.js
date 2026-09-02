@@ -69,7 +69,7 @@ signoutBtn.addEventListener("click", async () => {
   await db.auth.signOut();
 });
 
-const VALID_VIEWS = ["home", "todo", "reading", "habits", "watchlist", "study"];
+const VALID_VIEWS = ["home", "todo", "reading", "habits", "watchlist", "study", "ideas"];
 
 function showApp() {
   authScreen.hidden = true;
@@ -164,6 +164,7 @@ function navigateTo(view) {
   if (view === "habits") loadHabits();
   if (view === "watchlist") loadWatchlist();
   if (view === "study") loadStudyStats();
+  if (view === "ideas") loadIdeas();
 }
 
 document.querySelectorAll(".nav-item[data-view]:not([disabled])").forEach((btn) => {
@@ -1928,6 +1929,557 @@ readingDeleteConfirm.addEventListener("click", async () => {
 // ---------- Search control ----------
 
 readingSearchInput.addEventListener("input", renderReading);
+
+// ---------- Ideas Vault ----------
+// Ported from a standalone HTML artifact that stored data with
+// window.storage (artifact-only, doesn't work once deployed on GitHub
+// Pages). Categories and statuses are user-editable lists here rather
+// than hardcoded, so a brand-new account is seeded once with the
+// original app's defaults, then the person can rename/add/remove freely.
+
+const IDEA_DEFAULT_CATEGORIES = ["Projects", "Game", "Website", "Random", "Learn"];
+const IDEA_DEFAULT_STATUSES = [
+  { name: "Spark", color: "#C98A2C" },
+  { name: "Simmering", color: "#8A6440" },
+  { name: "Active", color: "#5C7A4A" },
+  { name: "Shelved", color: "#7A6A54" },
+  { name: "Done", color: "#6B4A2F" },
+];
+
+let ideas = [];
+let ideaCategories = [];
+let ideaStatuses = [];
+let ideasLoaded = false;
+let ideasChannel = null;
+let editingIdeaId = null;
+let pendingDeleteIdeaId = null;
+let activeIdeaCategory = "all";
+let activeIdeaStatus = "all";
+
+const ideaStatCardsEl = document.getElementById("idea-stat-cards");
+const ideaCategoryTabsEl = document.getElementById("idea-category-tabs");
+const ideaStatusTabsEl = document.getElementById("idea-status-tabs");
+const ideaSearchInput = document.getElementById("idea-search");
+const ideaListEl = document.getElementById("idea-list");
+const ideaEmptyEl = document.getElementById("idea-empty");
+const ideaAddBtn = document.getElementById("idea-add-btn");
+
+const ideaModalOverlay = document.getElementById("idea-modal-overlay");
+const ideaModalTitle = document.getElementById("idea-modal-title");
+const ideaModalForm = document.getElementById("idea-modal-form");
+const ideaModalCancel = document.getElementById("idea-modal-cancel");
+const ifTitle = document.getElementById("if-title");
+const ifCategory = document.getElementById("if-category");
+const ifStatus = document.getElementById("if-status");
+const ifPriority = document.getElementById("if-priority");
+const ifDescription = document.getElementById("if-description");
+const ifTags = document.getElementById("if-tags");
+const ideaTitleError = document.getElementById("idea-title-error");
+
+const ideaDeleteOverlay = document.getElementById("idea-delete-overlay");
+const ideaDeleteMsg = document.getElementById("idea-delete-msg");
+const ideaDeleteCancel = document.getElementById("idea-delete-cancel");
+const ideaDeleteConfirm = document.getElementById("idea-delete-confirm");
+
+const ideaManageCategoriesBtn = document.getElementById("idea-manage-categories-btn");
+const ideaCatManageOverlay = document.getElementById("idea-cat-manage-overlay");
+const ideaCatManageList = document.getElementById("idea-cat-manage-list");
+const ideaCatAddForm = document.getElementById("idea-cat-add-form");
+const ideaCatAddInput = document.getElementById("idea-cat-add-input");
+const ideaCatManageDone = document.getElementById("idea-cat-manage-done");
+
+const ideaManageStatusesBtn = document.getElementById("idea-manage-statuses-btn");
+const ideaStatusManageOverlay = document.getElementById("idea-status-manage-overlay");
+const ideaStatusManageList = document.getElementById("idea-status-manage-list");
+const ideaStatusAddForm = document.getElementById("idea-status-add-form");
+const ideaStatusAddInput = document.getElementById("idea-status-add-input");
+const ideaStatusAddColor = document.getElementById("idea-status-add-color");
+const ideaStatusManageDone = document.getElementById("idea-status-manage-done");
+
+const IDEA_PRIORITY_LABELS = { low: "Low", medium: "Medium", high: "High" };
+
+async function ensureIdeaTaxonomy() {
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const [catRes, statusRes] = await Promise.all([
+    db.from("idea_categories").select("*").order("sort_order", { ascending: true }),
+    db.from("idea_statuses").select("*").order("sort_order", { ascending: true }),
+  ]);
+  ideaCategories = catRes.data || [];
+  ideaStatuses = statusRes.data || [];
+
+  if (!ideaCategories.length) {
+    const { data: rows, error } = await db
+      .from("idea_categories")
+      .insert(IDEA_DEFAULT_CATEGORIES.map((name, i) => ({ user_id: userId, name, sort_order: i })))
+      .select();
+    if (!error && rows) ideaCategories = rows;
+  }
+  if (!ideaStatuses.length) {
+    const { data: rows, error } = await db
+      .from("idea_statuses")
+      .insert(IDEA_DEFAULT_STATUSES.map((s, i) => ({ user_id: userId, name: s.name, color: s.color, sort_order: i })))
+      .select();
+    if (!error && rows) ideaStatuses = rows;
+  }
+}
+
+async function loadIdeas() {
+  if (!ideasLoaded) {
+    ideaEmptyEl.textContent = "Loading…";
+    ideaEmptyEl.hidden = false;
+    ideaListEl.innerHTML = "";
+  }
+  await ensureIdeaTaxonomy();
+
+  const { data, error } = await db.from("ideas").select("*").order("created_at", { ascending: false });
+  if (error) {
+    console.error("Could not load ideas", error);
+    ideaEmptyEl.textContent = "Couldn't load your ideas.";
+    ideaEmptyEl.hidden = false;
+    return;
+  }
+  ideas = data || [];
+  ideasLoaded = true;
+  if (!ideaCategories.some((c) => c.id === activeIdeaCategory)) activeIdeaCategory = "all";
+  if (!ideaStatuses.some((s) => s.id === activeIdeaStatus)) activeIdeaStatus = "all";
+  renderIdeasPage();
+  subscribeIdeas();
+}
+
+function subscribeIdeas() {
+  if (ideasChannel) return;
+  ideasChannel = db
+    .channel("deck-ideas-changes")
+    .on("postgres_changes", { event: "*", schema: "public", table: "ideas" }, () => loadIdeas())
+    .on("postgres_changes", { event: "*", schema: "public", table: "idea_categories" }, () => loadIdeas())
+    .on("postgres_changes", { event: "*", schema: "public", table: "idea_statuses" }, () => loadIdeas())
+    .subscribe();
+}
+
+function ideaCategoryById(id) {
+  return ideaCategories.find((c) => c.id === id) || null;
+}
+function ideaStatusById(id) {
+  return ideaStatuses.find((s) => s.id === id) || null;
+}
+
+function renderIdeasPage() {
+  renderIdeaStatCards();
+  renderIdeaFilterTabs();
+  renderIdeaList();
+}
+
+function renderIdeaStatCards() {
+  ideaStatCardsEl.innerHTML = "";
+  const stats = [
+    { num: ideas.length, label: "Total ideas" },
+    { num: ideaCategories.length, label: "Categories" },
+    { num: ideaStatuses.length, label: "Statuses" },
+  ];
+  stats.forEach((s) => {
+    const el = document.createElement("div");
+    el.className = "stat-card";
+    el.innerHTML = `<div class="stat-num">${s.num}</div><div class="stat-label">${s.label}</div>`;
+    ideaStatCardsEl.appendChild(el);
+  });
+}
+
+function renderIdeaFilterTabs() {
+  ideaCategoryTabsEl.innerHTML = "";
+  const allCatTab = document.createElement("div");
+  allCatTab.className = "tab" + (activeIdeaCategory === "all" ? " active" : "");
+  allCatTab.textContent = "All categories";
+  allCatTab.addEventListener("click", () => {
+    activeIdeaCategory = "all";
+    renderIdeaList();
+    renderIdeaFilterTabs();
+  });
+  ideaCategoryTabsEl.appendChild(allCatTab);
+  ideaCategories.forEach((c) => {
+    const el = document.createElement("div");
+    el.className = "tab" + (activeIdeaCategory === c.id ? " active" : "");
+    el.textContent = c.name;
+    el.addEventListener("click", () => {
+      activeIdeaCategory = c.id;
+      renderIdeaList();
+      renderIdeaFilterTabs();
+    });
+    ideaCategoryTabsEl.appendChild(el);
+  });
+
+  ideaStatusTabsEl.innerHTML = "";
+  const allStatusTab = document.createElement("div");
+  allStatusTab.className = "tab" + (activeIdeaStatus === "all" ? " active" : "");
+  allStatusTab.textContent = "All statuses";
+  allStatusTab.addEventListener("click", () => {
+    activeIdeaStatus = "all";
+    renderIdeaList();
+    renderIdeaFilterTabs();
+  });
+  ideaStatusTabsEl.appendChild(allStatusTab);
+  ideaStatuses.forEach((s) => {
+    const el = document.createElement("div");
+    el.className = "tab" + (activeIdeaStatus === s.id ? " active" : "");
+    el.textContent = s.name;
+    el.addEventListener("click", () => {
+      activeIdeaStatus = s.id;
+      renderIdeaList();
+      renderIdeaFilterTabs();
+    });
+    ideaStatusTabsEl.appendChild(el);
+  });
+}
+
+function renderIdeaList() {
+  const search = ideaSearchInput.value.trim().toLowerCase();
+  const filtered = ideas.filter((it) => {
+    if (activeIdeaCategory !== "all" && it.category_id !== activeIdeaCategory) return false;
+    if (activeIdeaStatus !== "all" && it.status_id !== activeIdeaStatus) return false;
+    if (search) {
+      const haystack = `${it.title} ${it.description || ""} ${(it.tags || []).join(" ")}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+
+  ideaListEl.innerHTML = "";
+  filtered.forEach((it) => ideaListEl.appendChild(renderIdeaCard(it)));
+
+  if (!filtered.length) {
+    ideaEmptyEl.textContent = ideas.length ? "No ideas match your filters." : "No ideas yet. Tap + to spark one.";
+    ideaEmptyEl.hidden = false;
+  } else {
+    ideaEmptyEl.hidden = true;
+  }
+}
+
+function renderIdeaCard(it) {
+  const card = document.createElement("div");
+  card.className = "idea-card";
+  card.dataset.id = it.id;
+
+  const category = ideaCategoryById(it.category_id);
+  const status = ideaStatusById(it.status_id);
+
+  const badges = [];
+  if (category) badges.push(`<span class="idea-tag">${escapeHtml(category.name)}</span>`);
+  if (status) {
+    badges.push(
+      `<span class="status-badge" style="background:${status.color}29;color:${status.color};">${escapeHtml(status.name)}</span>`
+    );
+  }
+  badges.push(`<span class="priority-badge priority-badge--${it.priority}">${IDEA_PRIORITY_LABELS[it.priority]}</span>`);
+
+  card.innerHTML = `
+    <div class="idea-card-top">
+      <p class="idea-title">${escapeHtml(it.title)}</p>
+      <div class="idea-badges">${badges.join("")}</div>
+    </div>
+    ${it.description ? `<p class="idea-desc">${escapeHtml(it.description)}</p>` : ""}
+    ${
+      (it.tags || []).length
+        ? `<div class="idea-meta-row">${it.tags.map((t) => `<span class="idea-tag">${escapeHtml(t)}</span>`).join("")}</div>`
+        : ""
+    }
+    <div class="idea-card-actions">
+      <button type="button" class="btn-ghost btn-tiny" data-action="edit">Edit</button>
+      <button type="button" class="btn-ghost btn-tiny btn-ghost--danger" data-action="delete">Delete</button>
+    </div>
+  `;
+
+  card.querySelector('[data-action="edit"]').addEventListener("click", () => openIdeaModal(it));
+  card.querySelector('[data-action="delete"]').addEventListener("click", () => openIdeaDeleteModal(it));
+
+  return card;
+}
+
+// ---------- Add/edit modal ----------
+
+function populateIdeaSelects(idea) {
+  ifCategory.innerHTML = ideaCategories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+  ifStatus.innerHTML = ideaStatuses.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  if (idea) {
+    if (idea.category_id) ifCategory.value = idea.category_id;
+    if (idea.status_id) ifStatus.value = idea.status_id;
+  }
+}
+
+function openIdeaModal(idea) {
+  editingIdeaId = idea ? idea.id : null;
+  ideaModalTitle.textContent = idea ? "Edit idea" : "Add idea";
+  ifTitle.value = idea ? idea.title : "";
+  populateIdeaSelects(idea);
+  ifPriority.value = idea ? idea.priority : "medium";
+  ifDescription.value = idea ? idea.description || "" : "";
+  ifTags.value = idea ? (idea.tags || []).join(", ") : "";
+  ideaTitleError.classList.remove("show");
+  ideaModalOverlay.hidden = false;
+}
+
+function closeIdeaModal() {
+  ideaModalOverlay.hidden = true;
+  editingIdeaId = null;
+}
+
+ideaAddBtn.addEventListener("click", () => openIdeaModal(null));
+ideaModalCancel.addEventListener("click", closeIdeaModal);
+ideaModalOverlay.addEventListener("click", (e) => {
+  if (e.target === ideaModalOverlay) closeIdeaModal();
+});
+
+ideaModalForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = ifTitle.value.trim();
+  if (!title) {
+    ideaTitleError.classList.add("show");
+    return;
+  }
+  ideaTitleError.classList.remove("show");
+
+  const tags = ifTags.value
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  const updates = {
+    title,
+    category_id: ifCategory.value || null,
+    status_id: ifStatus.value || null,
+    priority: ifPriority.value,
+    description: ifDescription.value.trim() || null,
+    tags,
+  };
+
+  if (editingIdeaId) {
+    const idea = ideas.find((it) => it.id === editingIdeaId);
+    if (!idea) return;
+    Object.assign(idea, updates);
+    renderIdeasPage();
+    closeIdeaModal();
+    const { error } = await db.from("ideas").update(updates).eq("id", idea.id);
+    if (error) console.error("Could not save idea", error);
+  } else {
+    const userId = await getCurrentUserId();
+    if (!userId) return;
+    const { data: row, error } = await db
+      .from("ideas")
+      .insert({ user_id: userId, ...updates })
+      .select()
+      .single();
+    if (error) {
+      console.error("Could not add idea", error);
+      return;
+    }
+    ideas.unshift(row);
+    renderIdeasPage();
+    closeIdeaModal();
+  }
+});
+
+// ---------- Delete confirmation modal ----------
+
+function openIdeaDeleteModal(idea) {
+  pendingDeleteIdeaId = idea.id;
+  ideaDeleteMsg.textContent = `"${idea.title}" will be removed. This can't be undone.`;
+  ideaDeleteOverlay.hidden = false;
+}
+
+function closeIdeaDeleteModal() {
+  ideaDeleteOverlay.hidden = true;
+  pendingDeleteIdeaId = null;
+}
+
+ideaDeleteCancel.addEventListener("click", closeIdeaDeleteModal);
+ideaDeleteOverlay.addEventListener("click", (e) => {
+  if (e.target === ideaDeleteOverlay) closeIdeaDeleteModal();
+});
+ideaDeleteConfirm.addEventListener("click", async () => {
+  if (!pendingDeleteIdeaId) return;
+  const id = pendingDeleteIdeaId;
+  const removed = ideas.find((it) => it.id === id);
+  ideas = ideas.filter((it) => it.id !== id);
+  closeIdeaDeleteModal();
+  renderIdeasPage();
+
+  const { error } = await db.from("ideas").delete().eq("id", id);
+  if (error) {
+    console.error("Could not delete idea", error);
+    if (removed) ideas.unshift(removed);
+    renderIdeasPage();
+  }
+});
+
+// ---------- Manage categories ----------
+
+function renderIdeaCatManageList() {
+  ideaCatManageList.innerHTML = "";
+  ideaCategories.forEach((c) => {
+    const row = document.createElement("div");
+    row.className = "manage-row";
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(c.name)}" />
+      <button type="button" class="manage-row-remove" title="Delete">&times;</button>
+    `;
+    const input = row.querySelector("input");
+    input.addEventListener("change", () => renameIdeaCategory(c, input.value.trim()));
+    row.querySelector(".manage-row-remove").addEventListener("click", () => deleteIdeaCategory(c));
+    ideaCatManageList.appendChild(row);
+  });
+}
+
+async function renameIdeaCategory(cat, name) {
+  if (!name || name === cat.name) {
+    renderIdeaCatManageList();
+    return;
+  }
+  const prev = cat.name;
+  cat.name = name;
+  renderIdeaFilterTabs();
+  const { error } = await db.from("idea_categories").update({ name }).eq("id", cat.id);
+  if (error) {
+    console.error("Could not rename category", error);
+    cat.name = prev;
+    renderIdeaCatManageList();
+    renderIdeaFilterTabs();
+  }
+}
+
+async function deleteIdeaCategory(cat) {
+  ideaCategories = ideaCategories.filter((c) => c.id !== cat.id);
+  ideas.forEach((it) => {
+    if (it.category_id === cat.id) it.category_id = null;
+  });
+  if (activeIdeaCategory === cat.id) activeIdeaCategory = "all";
+  renderIdeaCatManageList();
+  renderIdeasPage();
+  const { error } = await db.from("idea_categories").delete().eq("id", cat.id);
+  if (error) {
+    console.error("Could not delete category", error);
+    loadIdeas();
+  }
+}
+
+ideaManageCategoriesBtn.addEventListener("click", () => {
+  renderIdeaCatManageList();
+  ideaCatManageOverlay.hidden = false;
+});
+ideaCatManageDone.addEventListener("click", () => {
+  ideaCatManageOverlay.hidden = true;
+});
+ideaCatManageOverlay.addEventListener("click", (e) => {
+  if (e.target === ideaCatManageOverlay) ideaCatManageOverlay.hidden = true;
+});
+ideaCatAddForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = ideaCatAddInput.value.trim();
+  if (!name) return;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { data: row, error } = await db
+    .from("idea_categories")
+    .insert({ user_id: userId, name, sort_order: ideaCategories.length })
+    .select()
+    .single();
+  if (error) {
+    console.error("Could not add category", error);
+    return;
+  }
+  ideaCategories.push(row);
+  ideaCatAddInput.value = "";
+  renderIdeaCatManageList();
+  renderIdeaFilterTabs();
+  renderIdeaStatCards();
+});
+
+// ---------- Manage statuses ----------
+
+function renderIdeaStatusManageList() {
+  ideaStatusManageList.innerHTML = "";
+  ideaStatuses.forEach((s) => {
+    const row = document.createElement("div");
+    row.className = "manage-row";
+    row.innerHTML = `
+      <input type="color" value="${s.color}" />
+      <input type="text" value="${escapeHtml(s.name)}" />
+      <button type="button" class="manage-row-remove" title="Delete">&times;</button>
+    `;
+    const colorInput = row.querySelector('input[type="color"]');
+    const textInput = row.querySelector('input[type="text"]');
+    colorInput.addEventListener("change", () => updateIdeaStatus(s, { color: colorInput.value }));
+    textInput.addEventListener("change", () => updateIdeaStatus(s, { name: textInput.value.trim() || s.name }));
+    row.querySelector(".manage-row-remove").addEventListener("click", () => deleteIdeaStatus(s));
+    ideaStatusManageList.appendChild(row);
+  });
+}
+
+async function updateIdeaStatus(status, updates) {
+  const prev = { name: status.name, color: status.color };
+  Object.assign(status, updates);
+  renderIdeaFilterTabs();
+  renderIdeaList();
+  const { error } = await db.from("idea_statuses").update(updates).eq("id", status.id);
+  if (error) {
+    console.error("Could not update status", error);
+    Object.assign(status, prev);
+    renderIdeaStatusManageList();
+    renderIdeaFilterTabs();
+    renderIdeaList();
+  }
+}
+
+async function deleteIdeaStatus(status) {
+  ideaStatuses = ideaStatuses.filter((s) => s.id !== status.id);
+  ideas.forEach((it) => {
+    if (it.status_id === status.id) it.status_id = null;
+  });
+  if (activeIdeaStatus === status.id) activeIdeaStatus = "all";
+  renderIdeaStatusManageList();
+  renderIdeasPage();
+  const { error } = await db.from("idea_statuses").delete().eq("id", status.id);
+  if (error) {
+    console.error("Could not delete status", error);
+    loadIdeas();
+  }
+}
+
+ideaManageStatusesBtn.addEventListener("click", () => {
+  renderIdeaStatusManageList();
+  ideaStatusManageOverlay.hidden = false;
+});
+ideaStatusManageDone.addEventListener("click", () => {
+  ideaStatusManageOverlay.hidden = true;
+});
+ideaStatusManageOverlay.addEventListener("click", (e) => {
+  if (e.target === ideaStatusManageOverlay) ideaStatusManageOverlay.hidden = true;
+});
+ideaStatusAddForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = ideaStatusAddInput.value.trim();
+  if (!name) return;
+  const color = ideaStatusAddColor.value;
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+  const { data: row, error } = await db
+    .from("idea_statuses")
+    .insert({ user_id: userId, name, color, sort_order: ideaStatuses.length })
+    .select()
+    .single();
+  if (error) {
+    console.error("Could not add status", error);
+    return;
+  }
+  ideaStatuses.push(row);
+  ideaStatusAddInput.value = "";
+  renderIdeaStatusManageList();
+  renderIdeaFilterTabs();
+  renderIdeaStatCards();
+});
+
+// ---------- Search control ----------
+
+ideaSearchInput.addEventListener("input", renderIdeaList);
 
 // Service worker + offline caching is deferred to the final PWA-polish
 // phase - it was registered too early and has been serving stale files

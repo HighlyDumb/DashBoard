@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Deck</title>
 <meta name="description" content="Personal dashboard" />
-<meta name="theme-color" content="#F3E9D5" />
+<meta name="theme-color" content="#F5EFE1" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icons/icon-192.png" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -92,6 +92,10 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           <span class="nav-label">Study</span>
         </button>
+        <button class="nav-item" data-view="ideas">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.7.5 1 1.3 1 2.3h6c0-1 .3-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>
+          <span class="nav-label">Ideas</span>
+        </button>
         <button class="nav-item nav-item--soon" data-view="calendar" disabled title="Coming later">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
           <span class="nav-label">Calendar</span>
@@ -128,6 +132,10 @@
             <button class="home-card" data-view="study">
               <h2>Study</h2>
               <p>Live stats from Study Suite.</p>
+            </button>
+            <button class="home-card" data-view="ideas">
+              <h2>Ideas</h2>
+              <p>Open your ideas vault.</p>
             </button>
           </div>
         </section>
@@ -221,6 +229,29 @@
           <div id="study-panel-body">
             <p class="panel-empty">Loading…</p>
           </div>
+        </section>
+
+        <section class="page" data-view="ideas" id="page-ideas" hidden>
+          <div class="page-head">
+            <h1>Ideas</h1>
+            <div class="idea-manage-buttons">
+              <button type="button" class="btn-ghost btn-tiny" id="idea-manage-categories-btn">Manage categories</button>
+              <button type="button" class="btn-ghost btn-tiny" id="idea-manage-statuses-btn">Manage statuses</button>
+            </div>
+          </div>
+
+          <div class="stat-cards" id="idea-stat-cards"></div>
+
+          <div class="tabs" id="idea-category-tabs"></div>
+          <div class="tabs" id="idea-status-tabs"></div>
+          <div class="toolbar">
+            <input type="text" id="idea-search" class="toolbar-search" placeholder="Search ideas…" />
+          </div>
+
+          <p class="panel-empty" id="idea-empty">No ideas yet. Tap + to spark one.</p>
+          <div class="card-grid" id="idea-list"></div>
+
+          <button type="button" class="fab" id="idea-add-btn" title="Add idea">+</button>
         </section>
 
       </main>
@@ -448,6 +479,93 @@
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="reading-delete-cancel">Cancel</button>
           <button type="button" class="btn-danger" id="reading-delete-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Idea add/edit modal -->
+    <div class="modal-overlay" id="idea-modal-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Add or edit idea">
+        <h2 id="idea-modal-title">Add idea</h2>
+        <form id="idea-modal-form" class="modal-form">
+          <label class="field">
+            <span>Title</span>
+            <input type="text" id="if-title" placeholder="e.g. A tool that..." required />
+            <div class="field-error" id="idea-title-error">Enter a title.</div>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Category</span>
+              <select id="if-category"></select>
+            </label>
+            <label class="field">
+              <span>Status</span>
+              <select id="if-status"></select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Priority</span>
+            <select id="if-priority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Description (optional)</span>
+            <textarea id="if-description" rows="3" placeholder="What's the idea?"></textarea>
+          </label>
+          <label class="field">
+            <span>Tags (comma-separated, optional)</span>
+            <input type="text" id="if-tags" placeholder="e.g. side-project, tools" />
+          </label>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="idea-modal-cancel">Cancel</button>
+            <button type="submit" class="btn-primary btn-small">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Idea delete confirmation modal -->
+    <div class="modal-overlay" id="idea-delete-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Delete idea">
+        <h2>Delete this idea?</h2>
+        <p class="panel-empty" id="idea-delete-msg"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="idea-delete-cancel">Cancel</button>
+          <button type="button" class="btn-danger" id="idea-delete-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manage categories modal -->
+    <div class="modal-overlay" id="idea-cat-manage-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Manage categories">
+        <h2>Manage categories</h2>
+        <div class="manage-list" id="idea-cat-manage-list"></div>
+        <form class="manage-add-row" id="idea-cat-add-form">
+          <input type="text" id="idea-cat-add-input" placeholder="New category name" />
+          <button type="submit" class="btn-secondary">Add</button>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary btn-small" id="idea-cat-manage-done">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manage statuses modal -->
+    <div class="modal-overlay" id="idea-status-manage-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Manage statuses">
+        <h2>Manage statuses</h2>
+        <div class="manage-list" id="idea-status-manage-list"></div>
+        <form class="manage-add-row" id="idea-status-add-form">
+          <input type="text" id="idea-status-add-input" placeholder="New status name" />
+          <input type="color" id="idea-status-add-color" value="#6B4A2F" title="Badge color" />
+          <button type="submit" class="btn-secondary">Add</button>
+        </form>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary btn-small" id="idea-status-manage-done">Done</button>
         </div>
       </div>
     </div>

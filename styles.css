@@ -1,23 +1,23 @@
 :root {
-  --bg: #F3E9D5;
-  --panel: #FAF4E7;
-  --panel-hover: #EDE1C6;
-  --border: #CDB890;
-  --text: #3C2C1E;
-  --text-muted: #8A7358;
-  --accent: #7C5330;
-  --accent-dim: #7C533033;
-  --accent-text: #FAF4E7;
-  --good: #6F8C4C;
-  --danger: #A13F2E;
+  --bg: #F5EFE1;
+  --panel: #FBF7EC;
+  --panel-hover: #ECE2CC;
+  --border: #D8C7A6;
+  --text: #3A2E22;
+  --text-muted: #7A6A54;
+  --accent: #6B4A2F;
+  --accent-dim: #6B4A2F33;
+  --accent-text: #FBF7EC;
+  --good: #5C7A4A;
+  --danger: #A1462F;
 
-  --priority-urgent: #A13F2E;
-  --priority-high: #B1602F;
+  --priority-urgent: #A1462F;
+  --priority-high: #8A6440;
   --priority-medium: #C98A2C;
-  --priority-low: #6F8C4C;
+  --priority-low: #5C7A4A;
 
-  --font-display: 'Space Grotesk', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  --font-display: 'Georgia', 'Iowan Old Style', serif;
+  --font-body: 'Georgia', 'Iowan Old Style', serif;
   --font-mono: 'IBM Plex Mono', monospace;
 
   --radius: 10px;
